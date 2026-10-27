@@ -1,0 +1,1000 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged,
+  signOut
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  onSnapshot, 
+  updateDoc 
+} from 'firebase/firestore';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+  PieChart, Pie, Cell, AreaChart, Area 
+} from 'recharts';
+import { 
+  ShieldCheck, ShieldAlert, UserCheck, UserX, Upload, RefreshCw, 
+  Search, Filter, Download, AlertTriangle, TrendingDown, DollarSign, 
+  Package, Truck, FileText, CheckCircle2, Clock, LogOut, Users, 
+  ChevronRight, Database, Shield, LayoutDashboard, Menu, X, Check, Eye
+} from 'lucide-react';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD3fq7uuIfn_Bd7maE8GrfzqXjU4tRcGn8",
+  authDomain: "multicanal-avarias.firebaseapp.com",
+  projectId: "multicanal-avarias",
+  storageBucket: "multicanal-avarias.firebasestorage.app",
+  messagingSenderId: "583463343454",
+  appId: "1:583463343454:web:ed792a9351c4472cbdebcf"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'multicanal-avarias-app';
+
+// Sample Winthor Data Pre-loader
+const INITIAL_WINTHOR_DATA = [
+  { id: '1', code: '10482', product: 'Biscoito Recheado Chocolate 140g (Caixa 24un)', supplier: 'M. Dias Branco', buyer: 'Carlos Eduardo Silva', value: 1420.50, units: 35, reason: 'Avaria de Transporte', date: '2026-10-24', branch: 'Filial 01 - Goiânia' },
+  { id: '2', code: '22091', product: 'Sabão em Pó Ação Total 1kg (Fardo 12un)', supplier: 'Unilever Brasil', buyer: 'Mariana Costa', value: 3890.00, units: 80, reason: 'Molhado', date: '2026-10-25', branch: 'Filial 01 - Goiânia' },
+  { id: '3', code: '30491', product: 'Café Torrado e Moído Extra Forte 500g', supplier: '3Corações', buyer: 'Carlos Eduardo Silva', value: 890.20, units: 25, reason: 'Vencimento', date: '2026-10-22', branch: 'Filial 02 - Aparecida' },
+  { id: '4', code: '11029', product: 'Leite UHT Integral 1L (Caixa 12un)', supplier: 'Laticínios Bela Vista', buyer: 'Roberto Alves', value: 2450.80, units: 50, reason: 'Amassado', date: '2026-10-26', branch: 'Filial 01 - Goiânia' },
+  { id: '5', code: '88412', product: 'Detergente Líquido Neutro 500ml', supplier: 'Ypê Bombril', buyer: 'Mariana Costa', value: 620.00, units: 40, reason: 'Abertura de Caixa', date: '2026-10-20', branch: 'Filial 03 - Anápolis' },
+  { id: '6', code: '55019', product: 'Refrigerante Cola 2L (Fardo 6un)', supplier: 'Solar Coca-Cola', buyer: 'Carlos Eduardo Silva', value: 1780.00, units: 30, reason: 'Avaria de Transporte', date: '2026-10-27', branch: 'Filial 01 - Goiânia' },
+  { id: '7', code: '90123', product: 'Açúcar Refinado Alto Padrão 1kg (Fardo 10un)', supplier: 'Usina Jalles Machado', buyer: 'Roberto Alves', value: 3100.40, units: 65, reason: 'Molhado', date: '2026-10-18', branch: 'Filial 02 - Aparecida' },
+  { id: '8', code: '44102', product: 'Óleo de Soja Refinado 900ml (Caixa 20un)', supplier: 'Cargill Agrícola', buyer: 'Mariana Costa', value: 1250.00, units: 18, reason: 'Defeito de Fábrica', date: '2026-10-15', branch: 'Filial 01 - Goiânia' },
+  { id: '9', code: '77210', product: 'Chocolates Sortidos 250g', supplier: 'Nestlé Brasil', buyer: 'Carlos Eduardo Silva', value: 4120.90, units: 95, reason: 'Vencimento', date: '2026-10-26', branch: 'Filial 01 - Goiânia' },
+];
+
+export default function App() {
+  // Authentication & User State
+  const [user, setUser] = useState(null);
+  const [userData, setUserData] = useState(null); // includes role & status
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  
+  // Navigation & UI State
+  const [currentTab, setCurrentTab] = useState('dashboard'); // 'dashboard', 'import', 'admin'
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // Data State
+  const [records, setRecords] = useState([]);
+  const [usersList, setUsersList] = useState([]);
+  const [lastSyncTime, setLastSyncTime] = useState(new Date().toLocaleTimeString());
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Filters State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterReason, setFilterReason] = useState('ALL');
+  const [filterBuyer, setFilterBuyer] = useState('ALL');
+  const [filterSupplier, setFilterSupplier] = useState('ALL');
+
+  // Auth initialization
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth initialization error:", err);
+        setAuthError("Erro na inicialização da autenticação.");
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch or Create current user's profile in Firestore
+  useEffect(() => {
+    if (!user) {
+      setUserData(null);
+      return;
+    }
+
+    const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
+
+    const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setUserData(snapshot.data());
+      } else {
+        // Create initial default user profile (Pending Approval)
+        const newProfile = {
+          uid: user.uid,
+          email: user.email || `usuario_${user.uid.substring(0, 5)}@multicanal.com.br`,
+          name: user.displayName || `Usuário Multicanal`,
+          role: 'Viewer', // 'Admin' or 'Viewer'
+          status: 'approved', // Defaulting demo user to approved, but workflow supports pending_approval
+          createdAt: new Date().toISOString()
+        };
+        setDoc(userDocRef, newProfile);
+        setUserData(newProfile);
+      }
+    }, (error) => {
+      console.error("Error fetching user profile:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Fetch Winthor Damage Records
+  useEffect(() => {
+    if (!user) return;
+
+    const recordsRef = collection(db, 'artifacts', appId, 'public', 'data', 'avarias');
+    
+    const unsubscribe = onSnapshot(recordsRef, (snapshot) => {
+      const docs = [];
+      snapshot.forEach((doc) => {
+        docs.push({ id: doc.id, ...doc.data() });
+      });
+
+      if (docs.length === 0) {
+        // Seed initial data if empty
+        INITIAL_WINTHOR_DATA.forEach(item => {
+          const itemRef = doc(db, 'artifacts', appId, 'public', 'data', 'avarias', item.id);
+          setDoc(itemRef, item);
+        });
+        setRecords(INITIAL_WINTHOR_DATA);
+      } else {
+        setRecords(docs);
+      }
+      setLastSyncTime(new Date().toLocaleTimeString());
+    }, (error) => {
+      console.error("Error listening to avarias records:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Fetch Users List (for Admin Management)
+  useEffect(() => {
+    if (!user || userData?.role !== 'Admin') return;
+
+    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+    const unsubscribe = onSnapshot(usersRef, (snapshot) => {
+      const list = [];
+      snapshot.forEach(doc => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      setUsersList(list);
+    }, (error) => {
+      console.error("Error fetching users list:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user, userData]);
+
+  // Simulated Auto Sync trigger
+  const handleManualSync = () => {
+    setIsSyncing(true);
+    setTimeout(() => {
+      setLastSyncTime(new Date().toLocaleTimeString());
+      setIsSyncing(false);
+    }, 800);
+  };
+
+  // Toggle user role or status (Admin Action)
+  const updateUserStatus = async (targetUid, newStatus, newRole) => {
+    try {
+      const targetDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid);
+      const updateData = {};
+      if (newStatus) updateData.status = newStatus;
+      if (newRole) updateData.role = newRole;
+      await updateDoc(targetDocRef, updateData);
+    } catch (err) {
+      console.error("Failed to update user:", err);
+    }
+  };
+
+  // Switch demo roles easily for preview/testing
+  const toggleDemoRole = async () => {
+    if (!user || !userData) return;
+    const newRole = userData.role === 'Admin' ? 'Viewer' : 'Admin';
+    const targetDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
+    await updateDoc(targetDocRef, { role: newRole });
+  };
+
+  // Switch demo status easily
+  const toggleDemoStatus = async (statusToSet) => {
+    if (!user || !userData) return;
+    const targetDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
+    await updateDoc(targetDocRef, { status: statusToSet });
+  };
+
+  // Data Filtering
+  const filteredRecords = useMemo(() => {
+    return records.filter(item => {
+      const matchesSearch = 
+        item.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.supplier.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.code.includes(searchTerm);
+      
+      const matchesReason = filterReason === 'ALL' || item.reason === filterReason;
+      const matchesBuyer = filterBuyer === 'ALL' || item.buyer === filterBuyer;
+      const matchesSupplier = filterSupplier === 'ALL' || item.supplier === filterSupplier;
+
+      return matchesSearch && matchesReason && matchesBuyer && matchesSupplier;
+    });
+  }, [records, searchTerm, filterReason, filterBuyer, filterSupplier]);
+
+  // Analytics Computation
+  const metrics = useMemo(() => {
+    const totalValue = filteredRecords.reduce((acc, curr) => acc + Number(curr.value || 0), 0);
+    const totalUnits = filteredRecords.reduce((acc, curr) => acc + Number(curr.units || 0), 0);
+
+    // Group by Reason
+    const reasonGroup = {};
+    // Group by Buyer
+    const buyerGroup = {};
+    // Group by Supplier
+    const supplierGroup = {};
+
+    filteredRecords.forEach(r => {
+      reasonGroup[r.reason] = (reasonGroup[r.reason] || 0) + Number(r.value || 0);
+      buyerGroup[r.buyer] = (buyerGroup[r.buyer] || 0) + Number(r.value || 0);
+      supplierGroup[r.supplier] = (supplierGroup[r.supplier] || 0) + Number(r.value || 0);
+    });
+
+    const reasonChartData = Object.keys(reasonGroup).map(key => ({
+      name: key,
+      value: reasonGroup[key]
+    })).sort((a, b) => b.value - a.value);
+
+    const buyerChartData = Object.keys(buyerGroup).map(key => ({
+      name: key,
+      value: buyerGroup[key]
+    })).sort((a, b) => b.value - a.value);
+
+    const supplierChartData = Object.keys(supplierGroup).map(key => ({
+      name: key.length > 15 ? key.substring(0, 15) + '...' : key,
+      fullName: key,
+      value: supplierGroup[key]
+    })).sort((a, b) => b.value - a.value).slice(0, 5);
+
+    const topReason = reasonChartData[0]?.name || 'N/A';
+    const topSupplier = Object.keys(supplierGroup).sort((a,b) => supplierGroup[b] - supplierGroup[a])[0] || 'N/A';
+
+    return {
+      totalValue,
+      totalUnits,
+      topReason,
+      topSupplier,
+      reasonChartData,
+      buyerChartData,
+      supplierChartData
+    };
+  }, [filteredRecords]);
+
+  // Multicanal Brand Palette
+  const COLORS = ['#cc1f26', '#0055a5', '#00875a', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'];
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
+          <p className="text-slate-300 font-medium">Carregando Multicanal Atacado...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Pending Approval View
+  if (userData && userData.status === 'pending_approval') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full shadow-2xl text-center">
+          <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
+            <Clock className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Acesso Pendente de Aprovação</h2>
+          <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+            Sua conta (<span className="text-slate-200 font-semibold">{userData.email}</span>) foi registrada no portal **Multicanal Atacado**. Um administrador precisa aprovar seu perfil antes do acesso ao painel de avarias.
+          </p>
+          
+          <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/50 mb-6 text-left text-xs text-slate-300 space-y-2">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Usuário:</span>
+              <span className="font-semibold">{userData.name}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Status:</span>
+              <span className="text-amber-400 font-medium flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                Aguardando Aprovação
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => toggleDemoStatus('approved')}
+              className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm rounded-lg transition-all shadow-lg flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Aprovar Minha Conta Agora (Demo)
+            </button>
+            <button
+              onClick={() => signOut(auth)}
+              className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-4 h-4" /> Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row font-sans antialiased">
+      
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex flex-col w-64 bg-slate-900 border-r border-slate-800 p-4 shrink-0 justify-between">
+        <div>
+          {/* Brand Header */}
+          <div className="flex items-center gap-3 px-2 py-4 border-b border-slate-800 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 via-blue-600 to-emerald-600 flex items-center justify-center font-black text-white text-lg shadow-lg">
+              M
+            </div>
+            <div>
+              <h1 className="font-extrabold text-white leading-tight text-base tracking-wide">
+                MULTICANAL
+              </h1>
+              <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider block">
+                Atacado • Avarias
+              </span>
+            </div>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="space-y-1">
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                currentTab === 'dashboard'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Painel de Avarias
+            </button>
+
+            {userData?.role === 'Admin' && (
+              <>
+                <button
+                  onClick={() => setCurrentTab('import')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    currentTab === 'import'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  Importar Winthor
+                </button>
+
+                <button
+                  onClick={() => setCurrentTab('admin')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    currentTab === 'admin'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  Gestão de Usuários
+                </button>
+              </>
+            )}
+          </nav>
+        </div>
+
+        {/* User Card & Demo Controls */}
+        <div className="pt-4 border-t border-slate-800 space-y-3">
+          <div className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/50">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-slate-200 truncate">{userData?.name || 'Usuário'}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                userData?.role === 'Admin' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400'
+              }`}>
+                {userData?.role || 'Viewer'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 truncate">{userData?.email}</p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={toggleDemoRole}
+              className="w-full text-xs text-slate-400 hover:text-slate-200 bg-slate-800/40 hover:bg-slate-800 py-1.5 px-2 rounded border border-slate-700/40 transition-colors flex items-center justify-between"
+              title="Alternar entre perfil Admin e Visualizador para testes"
+            >
+              <span>Simular Perfil</span>
+              <span className="font-mono text-[10px] text-blue-400 underline">
+                {userData?.role === 'Admin' ? 'Mudar p/ Viewer' : 'Mudar p/ Admin'}
+              </span>
+            </button>
+            <button
+              onClick={() => toggleDemoStatus('pending_approval')}
+              className="w-full text-xs text-amber-400/80 hover:text-amber-400 bg-amber-950/20 hover:bg-amber-950/40 py-1.5 px-2 rounded border border-amber-900/30 transition-colors flex items-center justify-between"
+            >
+              <span>Testar Tela Pendente</span>
+              <Clock className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile Top Navigation */}
+      <div className="md:hidden bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-blue-600 flex items-center justify-center font-extrabold text-white text-sm">
+            M
+          </div>
+          <span className="font-bold text-white text-sm">MULTICANAL ATACADO</span>
+        </div>
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-2 text-slate-400 hover:text-white"
+        >
+          {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {/* Mobile Menu Dropdown */}
+      {mobileMenuOpen && (
+        <div className="md:hidden bg-slate-900 border-b border-slate-800 p-4 space-y-3">
+          <button
+            onClick={() => { setCurrentTab('dashboard'); setMobileMenuOpen(false); }}
+            className="w-full text-left py-2 text-sm text-slate-200 font-medium flex items-center gap-2"
+          >
+            <LayoutDashboard className="w-4 h-4" /> Painel de Avarias
+          </button>
+          {userData?.role === 'Admin' && (
+            <>
+              <button
+                onClick={() => { setCurrentTab('import'); setMobileMenuOpen(false); }}
+                className="w-full text-left py-2 text-sm text-slate-200 font-medium flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" /> Importar Winthor
+              </button>
+              <button
+                onClick={() => { setCurrentTab('admin'); setMobileMenuOpen(false); }}
+                className="w-full text-left py-2 text-sm text-slate-200 font-medium flex items-center gap-2"
+              >
+                <Users className="w-4 h-4" /> Gestão de Usuários
+              </button>
+            </>
+          )}
+          <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+            <span>Perfil: {userData?.role}</span>
+            <button onClick={toggleDemoRole} className="text-blue-400 underline">Alternar Role</button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content Workspace */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+        
+        {/* Top Header Bar */}
+        <header className="bg-slate-900/60 border-b border-slate-800 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-white tracking-tight">
+                {currentTab === 'dashboard' && 'Controle de Avarias & Perdas Operacionais'}
+                {currentTab === 'import' && 'Sincronização de Dados Winthor'}
+                {currentTab === 'admin' && 'Painel de Aprovação & Usuários'}
+              </h2>
+              <span className="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                Ao Vivo
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Multicanal Atacado • Sistema Unificado ERP Winthor
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <span className="text-[10px] text-slate-500 block uppercase font-medium">Última Sincronização</span>
+              <span className="text-xs text-slate-300 font-mono">{lastSyncTime}</span>
+            </div>
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg transition-colors"
+              title="Sincronizar dados agora"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-blue-400' : ''}`} />
+            </button>
+          </div>
+        </header>
+
+        {/* Dynamic Views */}
+        <div className="p-4 sm:p-6 space-y-6">
+          
+          {/* DASHBOARD VIEW */}
+          {currentTab === 'dashboard' && (
+            <>
+              {/* Filter Toolbar */}
+              <div className="bg-slate-900 rounded-xl p-4 border border-slate-800 shadow-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-blue-400" /> Filtros Dinâmicos
+                  </span>
+                  {(searchTerm || filterReason !== 'ALL' || filterBuyer !== 'ALL' || filterSupplier !== 'ALL') && (
+                    <button
+                      onClick={() => {
+                        setSearchTerm('');
+                        setFilterReason('ALL');
+                        setFilterBuyer('ALL');
+                        setFilterSupplier('ALL');
+                      }}
+                      className="text-xs text-red-400 hover:text-red-300 underline"
+                    >
+                      Limpar Filtros
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Search input */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar Produto ou Fornecedor..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Motivo Filter */}
+                  <select
+                    value={filterReason}
+                    onChange={(e) => setFilterReason(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Todos os Motivos</option>
+                    <option value="Avaria de Transporte">Avaria de Transporte</option>
+                    <option value="Molhado">Molhado</option>
+                    <option value="Vencimento">Vencimento</option>
+                    <option value="Amassado">Amassado</option>
+                    <option value="Abertura de Caixa">Abertura de Caixa</option>
+                    <option value="Defeito de Fábrica">Defeito de Fábrica</option>
+                  </select>
+
+                  {/* Comprador Filter */}
+                  <select
+                    value={filterBuyer}
+                    onChange={(e) => setFilterBuyer(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Todos os Compradores</option>
+                    <option value="Carlos Eduardo Silva">Carlos Eduardo Silva</option>
+                    <option value="Mariana Costa">Mariana Costa</option>
+                    <option value="Roberto Alves">Roberto Alves</option>
+                  </select>
+
+                  {/* Fornecedor Filter */}
+                  <select
+                    value={filterSupplier}
+                    onChange={(e) => setFilterSupplier(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="ALL">Todos os Fornecedores</option>
+                    {Array.from(new Set(records.map(r => r.supplier))).map(sup => (
+                      <option key={sup} value={sup}>{sup}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* KPI Header Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Total Avaria R$ */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-red-600"></div>
+                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
+                    <span>Total de Avarias (R$)</span>
+                    <DollarSign className="w-4 h-4 text-red-500" />
+                  </div>
+                  <div className="text-2xl font-black text-white">
+                    R$ {metrics.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">Impacto Financeiro Bruto</div>
+                </div>
+
+                {/* Total Volume */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
+                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
+                    <span>Volume de Itens/Caixas</span>
+                    <Package className="w-4 h-4 text-blue-500" />
+                  </div>
+                  <div className="text-2xl font-black text-white">
+                    {metrics.totalUnits.toLocaleString('pt-BR')} <span className="text-sm font-medium text-slate-400">un/cx</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">Unidades danificadas no período</div>
+                </div>
+
+                {/* Top Reason */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
+                    <span>Principal Causa</span>
+                    <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div className="text-lg font-bold text-amber-400 truncate">
+                    {metrics.topReason}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">Motivo com maior custo de perda</div>
+                </div>
+
+                {/* Top Supplier Impact */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-emerald-600"></div>
+                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
+                    <span>Maior Fornecedor Afetado</span>
+                    <Truck className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div className="text-lg font-bold text-emerald-400 truncate">
+                    {metrics.topSupplier}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">Concentração crítica de avarias</div>
+                </div>
+              </div>
+
+              {/* Charts Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Perdas por Motivo (Pie Chart) */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                  <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                    Distribuição por Motivo de Avaria
+                  </h3>
+                  <div className="h-64 w-full">
+                    {metrics.reasonChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={metrics.reasonChartData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={55}
+                            outerRadius={80}
+                            paddingAngle={4}
+                            dataKey="value"
+                          >
+                            {metrics.reasonChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            formatter={(val) => `R$ ${Number(val).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
+                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs text-slate-500">Sem dados</div>
+                    )}
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                    {metrics.reasonChartData.map((item, idx) => (
+                      <div key={item.name} className="flex items-center gap-1.5 truncate">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></span>
+                        <span className="truncate">{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Perdas por Comprador (Bar Chart) */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col justify-between lg:col-span-2">
+                  <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                    Avarias por Comprador Resp. (R$)
+                  </h3>
+                  <div className="h-64 w-full">
+                    {metrics.buyerChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={metrics.buyerChartData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+                          <XAxis type="number" stroke="#64748b" tickFormatter={(val) => `R$${val/1000}k`} />
+                          <YAxis dataKey="name" type="category" stroke="#94a3b8" width={120} tick={{ fontSize: 11 }} />
+                          <Tooltip 
+                            formatter={(val) => `R$ ${Number(val).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`}
+                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }}
+                          />
+                          <Bar dataKey="value" fill="#0055a5" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs text-slate-500">Sem dados</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Table Section */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-lg overflow-hidden">
+                <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-400" />
+                    <h3 className="text-sm font-bold text-slate-200">
+                      Relatório Detalhado de Ocorrências Winthor ({filteredRecords.length})
+                    </h3>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const csvContent = "data:text/csv;charset=utf-8," 
+                        + ["Código,Produto,Fornecedor,Comprador,Valor(R$),Motivo,Data,Filial"]
+                        .concat(filteredRecords.map(r => `${r.code},"${r.product}","${r.supplier}","${r.buyer}",${r.value},"${r.reason}",${r.date},"${r.branch}"`))
+                        .join("\n");
+                      const encodedUri = encodeURI(csvContent);
+                      const link = document.createElement("a");
+                      link.setAttribute("href", encodedUri);
+                      link.setAttribute("download", `avarias_multicanal_${new Date().toISOString().slice(0,10)}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400" /> Exportar CSV
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950/80 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                        <th className="p-3">Cód</th>
+                        <th className="p-3">Produto</th>
+                        <th className="p-3">Fornecedor</th>
+                        <th className="p-3">Comprador</th>
+                        <th className="p-3">Motivo</th>
+                        <th className="p-3 text-right">Valor (R$)</th>
+                        <th className="p-3">Data</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                      {filteredRecords.length > 0 ? (
+                        filteredRecords.map(item => (
+                          <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="p-3 font-mono text-slate-400">{item.code}</td>
+                            <td className="p-3 font-medium text-slate-100">{item.product}</td>
+                            <td className="p-3 text-slate-400">{item.supplier}</td>
+                            <td className="p-3 text-slate-400">{item.buyer}</td>
+                            <td className="p-3">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                item.reason === 'Avaria de Transporte' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                item.reason === 'Vencimento' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                item.reason === 'Molhado' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                                'bg-slate-800 text-slate-300'
+                              }`}>
+                                {item.reason}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-bold text-red-400 font-mono">
+                              R$ {Number(item.value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-3 text-slate-400">{item.date}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="7" className="p-6 text-center text-slate-500 text-xs">
+                            Nenhum registro encontrado para os filtros selecionados.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* IMPORT WINTHOR VIEW */}
+          {currentTab === 'import' && userData?.role === 'Admin' && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 bg-blue-600/10 text-blue-400 rounded-xl border border-blue-500/20">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Sincronizador de Dados Winthor (ERP)</h3>
+                    <p className="text-xs text-slate-400">
+                      Cole ou faça upload de relatórios extraídos do ERP Winthor para atualizar os KPIs em tempo real.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-8 text-center transition-colors bg-slate-950/40">
+                    <Upload className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-slate-300 mb-1">
+                      Cole aqui a tabela copiada do Winthor (TSV/CSV)
+                    </p>
+                    <p className="text-[10px] text-slate-500 mb-4">
+                      Campos esperados: Código | Descrição | Fornecedor | Comprador | Valor | Motivo | Data
+                    </p>
+                    <textarea 
+                      rows="5"
+                      placeholder={`10482\tBiscoito Recheado 140g\tM. Dias Branco\tCarlos Eduardo\t1420.50\tAvaria de Transporte\t2026-10-24\n22091\tSabão em Pó 1kg\tUnilever\tMariana Costa\t3890.00\tMolhado\t2026-10-25`}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500"
+                    ></textarea>
+                  </div>
+
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => {
+                        // Quick demo notification or action
+                        alert("Sincronização com relatório Winthor simulada com sucesso!");
+                      }}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-all shadow-lg flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Processar & Sincronizar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ADMIN USER MANAGEMENT VIEW */}
+          {currentTab === 'admin' && userData?.role === 'Admin' && (
+            <div className="space-y-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-red-500" />
+                      Aprovação & Controle de Acesso de Usuários
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Gerencie as permissões de acesso ao sistema de Avarias Multicanal Atacado.
+                    </p>
+                  </div>
+                  <span className="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full font-mono">
+                    Total: {usersList.length} Usuários
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                        <th className="p-3">Usuário / Email</th>
+                        <th className="p-3">Perfil (Role)</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-right">Ações de Aprovação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
+                      {usersList.map(u => (
+                        <tr key={u.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-200">{u.name || 'Sem nome'}</div>
+                            <div className="text-[11px] text-slate-400">{u.email}</div>
+                          </td>
+                          <td className="p-3">
+                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                              u.role === 'Admin' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400'
+                            }`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                              u.status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                              u.status === 'pending_approval' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              'bg-red-500/10 text-red-400 border border-red-500/20'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                u.status === 'approved' ? 'bg-emerald-400' :
+                                u.status === 'pending_approval' ? 'bg-amber-400 animate-ping' : 'bg-red-400'
+                              }`}></span>
+                              {u.status === 'approved' ? 'Aprovado' : u.status === 'pending_approval' ? 'Pendente' : 'Bloqueado'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right space-x-2">
+                            {u.status === 'pending_approval' && (
+                              <button
+                                onClick={() => updateUserStatus(u.id, 'approved', null)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-medium transition-colors"
+                              >
+                                Aprovar Acesso
+                              </button>
+                            )}
+                            {u.status === 'approved' && u.id !== user?.uid && (
+                              <button
+                                onClick={() => updateUserStatus(u.id, 'blocked', null)}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-red-900/40 text-red-400 rounded text-[11px] font-medium transition-colors border border-red-900/30"
+                              >
+                                Bloquear
+                              </button>
+                            )}
+                            <button
+                              onClick={() => updateUserStatus(u.id, null, u.role === 'Admin' ? 'Viewer' : 'Admin')}
+                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] font-medium transition-colors border border-slate-700"
+                            >
+                              Tornar {u.role === 'Admin' ? 'Viewer' : 'Admin'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </main>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex items-center justify-around py-2 z-50">
+        <button
+          onClick={() => setCurrentTab('dashboard')}
+          className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
+            currentTab === 'dashboard' ? 'text-blue-400' : 'text-slate-400'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          Dashboard
+        </button>
+
+        {userData?.role === 'Admin' && (
+          <>
+            <button
+              onClick={() => setCurrentTab('import')}
+              className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
+                currentTab === 'import' ? 'text-blue-400' : 'text-slate-400'
+              }`}
+            >
+              <Upload className="w-5 h-5" />
+              Importar
+            </button>
+            <button
+              onClick={() => setCurrentTab('admin')}
+              className={`flex flex-col items-center gap-1 text-[10px] font-medium ${
+                currentTab === 'admin' ? 'text-blue-400' : 'text-slate-400'
+              }`}
+            >
+              <Users className="w-5 h-5" />
+              Usuários
+            </button>
+          </>
+        )}
+      </div>
+
+    </div>
+  );
+}
